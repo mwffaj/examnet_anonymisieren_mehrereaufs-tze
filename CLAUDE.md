@@ -7,16 +7,16 @@ facts: PLAN.md.
 
 ## Deployment
 
-GitHub Pages, publish folder `public/` (public repo; it holds only code, never student data).
+GitHub Pages, publish folder `docs/` (Pages only serves `/` or `/docs` from a branch) (public repo; it holds only code, never student data).
 Deliberately not Railway/Netlify: no Anthropic API, no queue, no proxy needed (the bookmarklet runs
 on exam.net itself, so all requests are same-origin with the teacher's cookies).
 
 ## Architecture
 
-- `public/index.html`: install page. Builds a tiny loader bookmarklet that injects
+- `docs/index.html`: install page. Builds a tiny loader bookmarklet that injects
   `tool.js?t=<now>` from the page's own location, so users always get the current version without
   reinstalling. Also hosts the manual upload mode (`#anon-app`).
-- `public/tool.js`: everything else, one IIFE, vanilla JS, no dependencies. Detects the mode:
+- `docs/tool.js`: everything else, one IIFE, vanilla JS, no dependencies. Detects the mode:
   on exam.net → full-screen overlay (Shadow DOM, keyboard events stopped at the host so exam.net
   shortcuts do not fire); on the install page → inline upload UI.
   - exam.net access: `GET /api/groups`, `GET /api/exams/?group=ID`, `GET /print/exams/ID`
@@ -36,6 +36,6 @@ on exam.net itself, so all requests are same-origin with the teacher's cookies).
 
 ## Local testing
 
-`npx serve public` or any static server for the upload mode. For the exam.net mode, inject
+`node dev-server.mjs` (port 8892) for the upload mode. For the exam.net mode, inject
 `tool.js` on exam.net (e.g. via Claude in Chrome) — the bookmarklet cannot load from localhost on an
 https page.

@@ -141,7 +141,7 @@ ExamNetAnonymisierer/
   CLAUDE.md        Entscheidungen (GitHub Pages, Vanilla JS, keine Deps), exam.net-Fakten
   PLAN.md          dieses Dokument
 
-  public/
+  docs/
     index.html     Installationsseite (Knopf zum Ziehen) + manueller Upload
     tool.js        gesamte Logik: Quelle (exam.net | Upload), Zuordnung, Codenamen, Export
 ```

@@ -1,9 +1,9 @@
-// Local static server for public/ (upload mode). Port 8892.
+// Local static server for docs/ (upload mode). Port 8892.
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-const dir = fileURLToPath(new URL("./public/", import.meta.url));
+const dir = fileURLToPath(new URL("./docs/", import.meta.url));
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
 createServer(async (req, res) => {
   const p = decodeURIComponent(new URL(req.url, "http://x").pathname);
