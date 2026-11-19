@@ -356,20 +356,20 @@
     for (let changed = true; changed;) {
       changed = false;
       ({ list, find } = makeClusters(nodes, parent));
-      // Same-name candidates of a cluster: not blocked, same name, never in the same exam.
-      const cands = (X) => list.filter((Z) => Z !== X && !blocked(X, Z) && intersects(X.norm, Z.norm) && !intersects(X.exams, Z.exams));
+      // A name is ambiguous only if two different groups with that name appear in the same exam
+      // (then there really are two people called e.g. "Lia"). Otherwise all "Lia"s are one person.
+      const ambiguous = (X, Y) => list.some((Z) => (intersects(Z.norm, X.norm) || intersects(Z.norm, Y.norm)) &&
+        list.some((W) => W !== Z && intersects(W.norm, Z.norm) && intersects(W.exams, Z.exams)));
+      // With two people of the same name, a shared device still decides, if it points to exactly one group.
+      const devUnique = (X, Y) => intersects(X.devices, Y.devices) &&
+        list.filter((Z) => Z !== X && intersects(Z.norm, X.norm) && intersects(Z.devices, X.devices) && !intersects(Z.exams, X.exams)).length === 1 &&
+        list.filter((Z) => Z !== Y && intersects(Z.norm, Y.norm) && intersects(Z.devices, Y.devices) && !intersects(Z.exams, Y.exams)).length === 1;
       outer: for (let x = 0; x < list.length; x++) for (let y = x + 1; y < list.length; y++) {
         const X = list[x], Y = list[y];
         if (blocked(X, Y)) continue;
         let merge = intersects(X.emails, Y.emails);
         if (!merge && intersects(X.norm, Y.norm) && !intersects(X.exams, Y.exams)) {
-          // Only when unambiguous: exactly one candidate on both sides, or exactly one sharing the device.
-          const cx = cands(X), cy = cands(Y);
-          if (cx.length === 1 && cy.length === 1) merge = true;
-          else if (intersects(X.devices, Y.devices)) {
-            merge = cx.filter((Z) => intersects(X.devices, Z.devices)).length === 1 &&
-                    cy.filter((Z) => intersects(Y.devices, Z.devices)).length === 1;
-          }
+          merge = !ambiguous(X, Y) || devUnique(X, Y);
         }
         if (merge) { union(X, Y); changed = true; break outer; }
       }
@@ -387,9 +387,11 @@
       const looseEq = intersects(X.loose, Y.loose);
       const reasons = [];
       if (sameExam) {
+        // Same exam: only a re-login is plausible. Same device, or "Savva" vs "Savva 2".
+        // Same name on different devices in one exam = two different people, no question.
         if (sameDev) reasons.push("gleiches Gerät");
-        if (sameName) reasons.push("gleicher Name");
-        else if (looseEq) reasons.push("ähnlicher Name");
+        if (sameDev && sameName) reasons.push("gleicher Name");
+        else if (!sameName && looseEq) reasons.push("ähnlicher Name");
         if (reasons.length) reasons.push("beide in derselben Prüfung (doppelt eingeloggt?)");
       } else {
         if (sameDev && !sameName) reasons.push("gleiches Gerät, anderer Name");
@@ -461,14 +463,14 @@
     error: "",
     busy: "",
     // examnet
-    groups: null, groupId: "", groupTitle: "", exams: null, examSel: new Set(),
+    groups: null, groupId: "", groupTitle: "", exams: null, examSel: new Set(), examMeta: new Map(), examCache: new Map(),
     // upload
     uploadLabel: "", batches: [], // {title, date, files:[{name, text, words}]}
     // common
     keyPersons: [], keyFileName: "",
     loadedExams: [], subs: [],
     nodes: [], cannot: new Set(), yes: [], questions: [], answers: {},
-    persons: [], personSel: new Set(), subSel: new Set(),
+    persons: [], personSel: new Set(), subSel: new Set(), subDecided: new Set(), codeOf: new Map(),
     format: "person", personLayout: "folder",
     lastCheck: null,
   };
@@ -574,7 +576,7 @@
         else if (!S.exams.length) exams = `<p>In diesem Ordner gibt es keine Prüfungen.</p>`;
         else exams = `
           <div class="row"><button class="b2" data-act="exam-all">Alle</button><button class="b2" data-act="exam-none">Keine</button>
-            <span class="muted">${S.examSel.size} gewählt</span></div>
+            <span class="muted">${S.examSel.size} gewählt${S.exams.filter((e) => S.examSel.has(String(e.id))).length < S.examSel.size ? " (auch in anderen Ordnern)" : ""}</span></div>
           <div class="list">${S.exams.map((e) => `
             <label><input type="checkbox" data-act="exam" data-id="${esc(e.id)}" ${S.examSel.has(String(e.id)) ? "checked" : ""}>
               <span>${esc(e.title)}</span><span class="muted">erstellt ${esc(e.created)}</span></label>`).join("")}
@@ -585,7 +587,8 @@
         <div class="chips">${groups || `<p>Keine Ordner gefunden. Lege auf exam.net pro Klasse einen Ordner an.</p>`}</div>
         ${S.groupId ? `<h2>2. Prüfungen wählen</h2>${exams}` : ""}
         ${viewKeyBlock()}
-        <div class="row"><button class="b" data-act="load" ${S.examSel.size && !S.busy ? "" : "disabled"}>Abgaben laden</button></div>`;
+        ${S.persons.length ? `<p class="muted">Bisherige Antworten und Codenamen bleiben erhalten. Bei Bedarf in einem anderen Ordner weitere Prüfungen anhaken (z.B. Nachprüfung).</p>` : ""}
+        <div class="row"><button class="b" data-act="load" ${S.examSel.size && !S.busy ? "" : "disabled"}>${S.persons.length ? "Übernehmen" : "Abgaben laden"}</button></div>`;
     }
     // upload
     const batches = S.batches.map((b, bi) => `
@@ -705,7 +708,7 @@
       <div class="row">
         <button class="b" data-act="export" ${nSubs ? "" : "disabled"}>Texte herunterladen (${nSubs})</button>
         <button class="b2" data-act="export-key">Schlüssel herunterladen (CSV)</button>
-        <button class="b2" data-act="back">Zurück zum Anfang</button>
+        <button class="b2" data-act="back">${S.mode === "examnet" ? "Weitere Prüfungen hinzufügen" : "Weitere Aufsätze hinzufügen"}</button>
       </div>
       <p class="muted">Der Schlüssel enthält die echten Namen. Gut aufbewahren, nicht der KI geben. Beim nächsten Mal wieder laden, damit die Codenamen gleich bleiben.</p>
       ${S.lastCheck ? (S.lastCheck.leaks.length
@@ -718,25 +721,31 @@
     S.error = ""; S.lastCheck = null;
     try {
       if (S.mode === "examnet") {
-        const chosen = S.exams.filter((e) => S.examSel.has(String(e.id)));
+        // Selection may span several folders (e.g. a make-up exam in another folder).
+        const chosen = [...S.examSel].map((id) => S.examMeta.get(id)).filter(Boolean);
         S.loadedExams = []; S.subs = [];
         for (let i = 0; i < chosen.length; i++) {
-          S.busy = `Lade Abgaben ${i + 1} von ${chosen.length}: ${chosen[i].title} …`; render();
-          const { exam, subs } = await examnet.load(chosen[i]);
+          const id = String(chosen[i].id);
+          if (!S.examCache.has(id)) {
+            S.busy = `Lade Abgaben ${i + 1} von ${chosen.length}: ${chosen[i].title} …`; render();
+            S.examCache.set(id, await examnet.load(chosen[i]));
+          }
+          const { exam, subs } = S.examCache.get(id);
           S.loadedExams.push(exam); S.subs.push(...subs);
         }
       } else {
-        S.loadedExams = S.batches.map((b, bi) => ({ key: "u" + bi, title: b.title.trim(), date: b.date }));
-        S.subs = S.batches.flatMap((b, bi) => b.files.map((f, fi) => {
+        S.loadedExams = S.batches.map((b) => ({ key: "u" + b.id, title: b.title.trim(), date: b.date }));
+        S.subs = S.batches.flatMap((b) => b.files.map((f) => {
           const parts = f.name.trim().split(/\s+/);
-          return { uid: `u${bi}_${fi}`, examKey: "u" + bi, firstName: parts[0] || "", lastName: parts.slice(1).join(" "),
+          return { uid: "u" + f.id, examKey: "u" + b.id, firstName: parts[0] || "", lastName: parts.slice(1).join(" "),
             email: "", device: "", createdAt: b.date, text: f.text, words: f.words };
         }));
       }
       S.busy = "";
       if (!S.subs.length) throw new Error("Keine Abgaben gefunden.");
+      // Node ids are stable, so earlier answers (S.yes / S.cannot) and codenames stay valid
+      // when exams are added later.
       S.nodes = buildNodes(S.keyPersons, S.subs);
-      S.cannot = new Set(); S.yes = [];
       runMatching();
     } catch (e) {
       S.busy = ""; S.error = e.message || String(e); render();
@@ -765,8 +774,11 @@
     const persons = clusters.map((C) => {
       const ns = C.idx.map((i) => S.nodes[i]);
       const key = ns.find((n) => n.kind === "key");
+      // Reuse a codename given earlier in this session, so adding exams does not reshuffle names.
+      const earlier = ns.map((n) => S.codeOf.get(n.id)).filter(Boolean).sort()[0];
       return {
-        code: key ? key.key.code : "",
+        nodeIds: ns.map((n) => n.id),
+        code: key ? key.key.code : (earlier || ""),
         names: [...C.names],
         emails: [...C.emails],
         devices: [...C.devices],
@@ -774,17 +786,24 @@
       };
     });
     // New codenames: unused, and not containing any known name word (else the name check would fire).
-    const used = new Set(persons.map((p) => p.code).filter(Boolean));
+    // Two groups that got the same earlier code (cannot normally happen) → second gets a new one.
+    const seen = new Set();
+    for (const p of persons) { if (p.code && seen.has(p.code)) p.code = ""; if (p.code) seen.add(p.code); }
+    const used = new Set([...seen, ...S.codeOf.values()]);
     const nameWords = new Set(persons.flatMap((p) => p.names.flatMap((n) => normName(n).split(" "))));
     const pool = shuffle(allCodes().filter((c) => !used.has(c) && !normName(c).split(" ").some((w) => nameWords.has(w))));
     for (const p of persons) if (!p.code) {
       if (!pool.length) throw new Error("Zu viele Personen für die Codenamen-Liste.");
       p.code = pool.pop();
     }
+    for (const p of persons) for (const id of p.nodeIds) S.codeOf.set(id, p.code);
     persons.sort((a, b) => a.code.localeCompare(b.code, "de"));
+    // Keep the teacher's earlier choices; new persons/submissions get the defaults.
+    const prevPersons = S.persons.map((p) => p.code);
     S.persons = persons;
-    S.personSel = new Set(persons.filter((p) => p.subs.length).map((p) => p.code));
-    S.subSel = new Set(S.subs.filter((s) => s.words >= TINY_WORDS).map((s) => s.uid));
+    S.personSel = new Set(persons.filter((p) => p.subs.length && (S.personSel.has(p.code) || !prevPersons.includes(p.code))).map((p) => p.code));
+    S.subSel = new Set(S.subs.filter((s) => S.subDecided.has(s.uid) ? S.subSel.has(s.uid) : s.words >= TINY_WORDS).map((s) => s.uid));
+    S.subs.forEach((s) => S.subDecided.add(s.uid));
   }
 
   // ---------- Export ----------
@@ -880,16 +899,19 @@
     switch (act) {
       case "close": host.style.display = "none"; return;
       case "group": {
-        S.groupId = t.dataset.id; S.groupTitle = S.groups.find((g) => String(g.id) === S.groupId)?.title || "";
-        S.exams = null; S.examSel = new Set(); render();
-        try { S.exams = await examnet.exams(S.groupId); } catch (e) { S.error = e.message; S.exams = []; }
+        S.groupId = t.dataset.id;
+        // The first folder names the export; selections in other folders are kept.
+        if (!S.groupTitle || !S.examSel.size) S.groupTitle = S.groups.find((g) => String(g.id) === S.groupId)?.title || "";
+        S.exams = null; render();
+        try { S.exams = await examnet.exams(S.groupId); S.exams.forEach((e) => S.examMeta.set(String(e.id), e)); }
+        catch (e) { S.error = e.message; S.exams = []; }
         break;
       }
-      case "exam-all": S.examSel = new Set(S.exams.map((e) => String(e.id))); break;
-      case "exam-none": S.examSel = new Set(); break;
+      case "exam-all": S.exams.forEach((e) => S.examSel.add(String(e.id))); break;
+      case "exam-none": S.exams.forEach((e) => S.examSel.delete(String(e.id))); break;
       case "key-clear": S.keyPersons = []; S.keyFileName = ""; break;
       case "load": await loadSource(); return;
-      case "b-add": S.batches.push({ title: "", date: today(), files: [] }); break;
+      case "b-add": S.batches.push(newBatch()); break;
       case "b-del": S.batches.splice(+t.dataset.b, 1); break;
       case "f-del": S.batches[+t.dataset.b].files.splice(+t.dataset.f, 1); break;
       case "apply": applyAnswers(); return;
@@ -952,10 +974,13 @@
     if (btn) btn.disabled = !ready;
   });
 
+  let seq = 0;
+  const newBatch = () => ({ id: ++seq, title: "", date: today(), files: [] });
+
   async function readUploads(files) {
     const out = [];
     const nameOf = (fn) => fn.split("/").pop().replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
-    const addText = (fn, text) => { text = text.replace(/\r\n?/g, "\n").trim(); out.push({ name: nameOf(fn), text, words: wordCount(text) }); };
+    const addText = (fn, text) => { text = text.replace(/\r\n?/g, "\n").trim(); out.push({ id: ++seq, name: nameOf(fn), text, words: wordCount(text) }); };
     for (const f of files) {
       const lower = f.name.toLowerCase();
       if (lower.endsWith(".docx")) addText(f.name, await docxToText(await f.arrayBuffer()));
@@ -981,7 +1006,7 @@
     examnet.groups().then((g) => { S.groups = g; render(); })
       .catch((e) => { S.groups = []; S.error = e.message; render(); });
   } else {
-    S.batches.push({ title: "", date: today(), files: [] });
+    S.batches.push(newBatch());
     render();
   }
 
