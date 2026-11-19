@@ -36,6 +36,16 @@
     ["Känguru", "n"], ["Reh", "n"], ["Wiesel", "n"],
   ];
   const ENDING = { m: "er", f: "e", n: "es" };
+  // Common words that must never be replaced, even if a student typed them into the name field
+  // ("Lia mit Laptop") or they are name particles ("von", "de").
+  const STOPWORDS = new Set(("der die das den dem des ein eine einen einem einer eines und oder aber sondern " +
+    "mit ohne für fur von vom zu zum zur im in an am auf aus bei beim bis durch gegen nach über uber unter vor " +
+    "hinter neben zwischen um ab seit trotz wegen während ist sind war waren bin bist hat haben hatte wird werden " +
+    "wurde sein nicht kein keine auch noch nur so wie als wenn dass da dann denn doch ja nein man er sie es wir " +
+    "ihr ich du sich mich mir dich dir uns euch was wer wo warum weil hier dort sehr mehr schon immer alle alles " +
+    "viel wenig gut neu jetzt heute klasse test prüfung prufung aufsatz name vorname nachname schüler schuler " +
+    "schülerin van de da di le la du del della dos al el bin ben ibn the and of to with for my is " +
+    "teil gruppe laptop computer pc neu alt nr").split(" "));
 
   // ---------- Small helpers ----------
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -423,6 +433,7 @@
       tok = String(tok || "").trim();
       if (tok.length < 2) return;
       const k = tok.toLowerCase();
+      if (STOPWORDS.has(k) || /^[0-9]+$/.test(k)) return;
       if (!tokenCodes.has(k)) tokenCodes.set(k, new Set());
       tokenCodes.get(k).add(code);
     };
@@ -435,11 +446,12 @@
       }
     }
     const tokens = [...tokenCodes.keys()].sort((a, b) => b.length - a.length);
-    if (!tokens.length) return { apply: (t) => ({ text: t, count: 0 }), tokens: [] };
+    if (!tokens.length) return { apply: (t) => ({ text: t, count: 0 }), tokens: [], stats: new Map() };
     // Optional German genitive ("Mias", "Mia's") is part of the match and kept in a readable form.
     const re = new RegExp("(?<![\\p{L}\\p{N}@])(" + tokens.map(reEsc).join("|") + ")(s|['’]s)?(?![\\p{L}\\p{N}@])", "giu");
+    const stats = new Map(); // token as written in the name → number of replacements
     return {
-      tokens,
+      tokens, stats,
       apply(text) {
         let count = 0;
         const out = text.replace(re, (m, name, gen) => {
@@ -448,6 +460,8 @@
           else codes = tokenCodes.get(name.toLowerCase());
           if (!codes) return m;
           count++;
+          const key = gen ? name.toLowerCase() : m.toLowerCase();
+          stats.set(key, (stats.get(key) || 0) + 1);
           const code = codes.size === 1 ? [...codes][0] : "[Name]";
           return gen ? code + (/[sxzß]$/i.test(code) ? "’" : "s") : code;
         });
@@ -457,8 +471,9 @@
   }
 
   // ---------- App state ----------
-  const S = {
+  const freshState = () => ({
     mode: ON_EXAMNET ? "examnet" : "upload",
+    confirmReset: false,
     step: "source",
     error: "",
     busy: "",
@@ -473,7 +488,13 @@
     persons: [], personSel: new Set(), subSel: new Set(), subDecided: new Set(), codeOf: new Map(),
     format: "person", personLayout: "folder",
     lastCheck: null,
-  };
+  });
+  const S = freshState();
+  function resetAll() {
+    const groups = S.groups;
+    Object.assign(S, freshState(), { groups });
+    if (S.mode === "upload") S.batches.push(newBatch());
+  }
 
   // ---------- UI shell ----------
   const host = document.createElement("div");
@@ -496,6 +517,7 @@
     .inline .panel { border: 0; max-width: none; }
     header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 2px solid #111; }
     header h1 { font-size: 19px; margin: 0; }
+    header span { display: flex; gap: 14px; align-items: center; }
     .x { background: none; border: 0; font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px; color: #111; }
     .body { padding: 18px 20px 24px; }
     .inline .body { padding: 0; }
@@ -539,8 +561,14 @@
     const inner = ({ source: viewSource, questions: viewQuestions, select: viewSelect })[S.step]();
     const shell = `
       <div class="panel">
-        ${ON_EXAMNET ? `<header><h1>Aufsätze anonymisieren</h1><button class="x" data-act="close" title="Schliessen">×</button></header>` : ""}
+        ${ON_EXAMNET ? `<header><h1>Aufsätze anonymisieren</h1><span>
+          <button class="b2" data-act="reset-ask">Neu beginnen</button>
+          <button class="x" data-act="close" title="Schliessen">×</button></span></header>` : ""}
         <div class="body">
+          ${!ON_EXAMNET ? `<div class="row" style="justify-content:flex-end;margin-top:0"><button class="b2" data-act="reset-ask">Neu beginnen</button></div>` : ""}
+          ${S.confirmReset ? `<div class="warn"><b>Alles löschen und neu beginnen?</b> Geladene Prüfungen, Antworten und Codenamen werden verworfen.
+            Den Schlüssel vorher herunterladen, falls du ihn noch brauchst.
+            <div class="row"><button class="b" data-act="reset-yes">Ja, alles löschen</button><button class="b2" data-act="reset-no">Abbrechen</button></div></div>` : ""}
           ${S.error ? `<div class="err">${esc(S.error)}</div>` : ""}
           ${S.busy ? `<div class="busy">${esc(S.busy)}</div>` : ""}
           ${inner}
@@ -713,7 +741,9 @@
       <p class="muted">Der Schlüssel enthält die echten Namen. Gut aufbewahren, nicht der KI geben. Beim nächsten Mal wieder laden, damit die Codenamen gleich bleiben.</p>
       ${S.lastCheck ? (S.lastCheck.leaks.length
         ? `<div class="warn"><b>Achtung:</b> Im Export steht möglicherweise noch: ${esc(S.lastCheck.leaks.join(", "))}. Bitte vor dem Weitergeben prüfen.</div>`
-        : `<div class="ok">Geprüft: Im Export steht keine E-Mail-Adresse und kein bekannter Name mehr (${S.lastCheck.count} Ersetzungen).</div>`) : ""}`;
+        : `<div class="ok">Geprüft: Im Export steht keine E-Mail-Adresse und kein bekannter Name mehr (${S.lastCheck.count} Ersetzungen).</div>`) +
+        `<p class="muted">Ersetzte Wörter (Anzahl): ${S.lastCheck.stats.map(([t, n]) => esc(t) + "&nbsp;(" + n + ")").join(", ") || "keine"}.
+          Steht hier ein gewöhnliches Wort, bitte melden.</p>` : ""}`;
   }
 
   // ---------- Logic: load, match, persons ----------
@@ -866,7 +896,7 @@
       const re = new RegExp("(?<![\\p{L}\\p{N}])" + reEsc(t) + "(?![\\p{L}\\p{N}])", "iu");
       if (re.test(all)) leaks.add("«" + t + "»");
     }
-    S.lastCheck = { leaks: [...leaks], count };
+    S.lastCheck = { leaks: [...leaks], count, stats: [...rep.stats].sort((a, b) => b[1] - a[1]) };
     return { files, label };
   }
 
@@ -898,6 +928,9 @@
     S.error = "";
     switch (act) {
       case "close": host.style.display = "none"; return;
+      case "reset-ask": S.confirmReset = true; break;
+      case "reset-no": S.confirmReset = false; break;
+      case "reset-yes": resetAll(); break;
       case "group": {
         S.groupId = t.dataset.id;
         // The first folder names the export; selections in other folders are kept.
