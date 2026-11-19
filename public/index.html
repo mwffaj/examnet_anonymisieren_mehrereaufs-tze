@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aufsätze anonymisieren</title>
+<style>
+  :root { --fg: #111; --muted: #555; --line: #111; --bg: #fff; --accent: #c8102e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 19px; margin: 40px 0 10px; padding-top: 14px; border-top: 2px solid var(--line); }
+  p, li { color: var(--muted); }
+  p { margin: 0 0 14px; }
+  ol, ul { padding-left: 22px; margin: 0 0 14px; }
+  li { margin-bottom: 6px; }
+  b { color: var(--fg); }
+  code { font: 14px ui-monospace, Menlo, monospace; background: #f1f1f1; padding: 1px 4px; }
+  .bm { display: inline-block; margin: 8px 0 18px; padding: 12px 20px; border: 2px solid var(--line); background: var(--fg);
+    color: #fff; font-weight: 700; text-decoration: none; cursor: grab; }
+  .note { border-left: 4px solid var(--accent); padding: 4px 0 4px 14px; }
+  #anon-app { margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Aufsätze anonymisieren</h1>
+  <p>Holt die Aufsätze einer Klasse aus mehreren exam.net-Prüfungen und gibt allen Schüler/innen einen festen Codenamen (z.&nbsp;B. «Grauer Fuchs»), der über alle Aufsätze gleich bleibt. So lassen sich Entwicklungen über mehrere Aufsätze mit einer KI untersuchen, ohne dass sie Namen sieht.</p>
+
+  <h2>Einrichten</h2>
+  <p>Ziehe diesen Knopf in deine Lesezeichenleiste (einmalig):</p>
+  <a id="bm" class="bm" href="#">Aufsätze anonymisieren</a>
+  <p>Lesezeichenleiste nicht sichtbar? In Chrome: <code>Cmd + Shift + B</code> (Mac) bzw. <code>Ctrl + Shift + B</code> (Windows).</p>
+
+  <h2>Gebrauch</h2>
+  <ol>
+    <li>Bei <b>exam.net</b> einloggen (irgendeine Seite, z.&nbsp;B. die Testübersicht).</li>
+    <li>Auf das Lesezeichen <b>Aufsätze anonymisieren</b> klicken.</li>
+    <li>Klasse (Ordner) wählen, dann die Prüfungen.</li>
+    <li>Optional den <b>Schlüssel vom letzten Mal</b> laden, damit alle denselben Codenamen behalten.</li>
+    <li>Rückfragen beantworten (siehe unten), Schüler/innen wählen, Format wählen, herunterladen.</li>
+    <li><b>Schlüssel herunterladen</b> und gut aufbewahren.</li>
+  </ol>
+
+  <h2>Wie erkennt das Tool, wer wer ist?</h2>
+  <ul>
+    <li><b>E-Mail</b>: Ist sie vorhanden (Schul-Login in exam.net), ist die Zuordnung eindeutig.</li>
+    <li><b>Name</b>: Gleich geschriebene Namen in verschiedenen Prüfungen gelten als dieselbe Person.</li>
+    <li><b>Rückfrage</b> bei ähnlichen Namen («Peter» / «Peterr» / «Peter2»), bei gleichem Gerät mit anderem Namen und wenn ein Name in derselben Prüfung zweimal vorkommt (z.&nbsp;B. neu eingeloggt). Das Tool entscheidet dann nicht selbst, du entscheidest.</li>
+  </ul>
+  <p class="note">Tipp: In den exam.net-Einstellungen der Prüfung das Schul-Login (Microsoft) verlangen. Dann ist die E-Mail dabei und es gibt kaum Rückfragen.</p>
+
+  <h2>Was heruntergeladen wird</h2>
+  <ul>
+    <li><b>Texte</b> als Markdown (<code>.md</code>), wahlweise pro Schüler/in (Ordner oder eine Datei), pro Aufsatz oder alles in einer Datei. Die Aufsätze sind nach Datum nummeriert (1 = ältester). Dazu eine <code>Übersicht.md</code>.</li>
+    <li>Im Text werden <b>Namen und E-Mail-Adressen</b> durch den Codenamen ersetzt, auch Namen von Mitschüler/innen. Ist ein Name mehrdeutig (zwei Personen gleichen Vornamens), steht «[Name]». IP-Adresse, Gerät und Browser kommen nicht mit.</li>
+    <li>Der <b>Schlüssel</b> (<code>.csv</code>, öffnet in Excel) enthält Codename, E-Mail, alle Schreibweisen des Namens und die Geräte. Ihn nie der KI geben.</li>
+  </ul>
+  <p>Vor dem Download prüft das Tool, ob im Text noch eine E-Mail-Adresse oder ein bekannter Name steht, und warnt dann. Namen, die zugleich gewöhnliche Wörter sind, werden mitersetzt.</p>
+
+  <h2>Ohne exam.net: Dateien hochladen</h2>
+  <p>Für Aufsätze aus anderen Quellen oder als Ersatz, falls das Lesezeichen nicht funktioniert. Word, Text oder ZIP, eine Datei pro Abgabe, Name im Dateinamen.</p>
+  <div id="anon-app"></div>
+
+  <h2>Datenschutz</h2>
+  <p>Alles läuft in deinem Browser. Weder Namen noch Texte werden irgendwohin geschickt. Diese Seite liefert nur das Programm.</p>
+
+  <h2>Grenzen</h2>
+  <p>Das Tool nutzt keine offizielle Schnittstelle von exam.net. exam.net kann seine Seite jederzeit ändern. Funktioniert das Lesezeichen plötzlich nicht mehr, liegt es meist daran.</p>
+</main>
+<script>
+"use strict";
+// Loader bookmarklet: always fetches the current tool.js from where this page is hosted.
+(function () {
+  const src = new URL("tool.js", location.href).href;
+  const code = "(function(){if(!/(^|\\.)exam\\.net$/.test(location.hostname)){alert('Bitte zuerst exam.net öffnen und einloggen.');return;}" +
+    "var s=document.createElement('script');s.src=" + JSON.stringify(src) + "+'?t='+Date.now();" +
+    "s.onerror=function(){alert('Das Tool konnte nicht geladen werden. Internetverbindung prüfen.');};" +
+    "document.head.appendChild(s);})();void 0";
+  const a = document.getElementById("bm");
+  a.href = "javascript:" + encodeURIComponent(code);
+  a.addEventListener("click", function (e) {
+    e.preventDefault();
+    alert("Nicht hier klicken: Ziehe den Knopf in die Lesezeichenleiste und klicke ihn dann auf exam.net.");
+  });
+})();
+</script>
+<script src="tool.js"></script>
+</body>
+</html>
